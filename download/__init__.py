@@ -1,1 +1,1 @@
-from .viirs import ViirsDownloader
+from .earthdata import EarthDataDownloader
