@@ -5,30 +5,51 @@ from earthaccess.results import DataGranule
 
 import numpy as np
 
-__all__ = ['EarthDataDownloader']
+from lowres import parse
+from lowres import xrload
+
+__all__ = ['EarthDataLoader']
 
 
 ###################################################################################################################
 
-class EarthDataDownloader:
+class EarthDataLoader:
     """
-    Downloader class for VIIRS satellite data and associated geo encoding files
+    Loader class for satellite data and associated geo encoding
 
     Examples:
 
     VIIRS Near Real Time
-    edd = EarthDataDownloader("VNP09_NRT", geo_prod_id="VNP03IMG")
+    edl = EarthDataLoader("VNP09_NRT", geo_prod_id="VNP03IMG")
 
     Sentinel-3A Synergy Level-2
-    edd = EarthDataDownloader("S3A_SY_2_SYN")
+    edl = EarthDataLoader("S3A_SY_2_SYN")
 
     Sentinel-3A Olci Level-2 Near Real Time
-    edd = EarthDataDownloader("OLCIS3A_L2_EFR_IOP_NRT")
+    edl = EarthDataLoader("OLCIS3A_L2_EFR_IOP_NRT")
     """
+
+    AVAILABLE_PRODUCTS = [
+        "VNP09_NRT", 
+        "OLCIS3*_L2_EFR_IOP_NRT", 
+        "S3*_SY_2_SYN"
+    ]
+
+    _TSTAMP_PARSERS = {
+        "VNP09_NRT": parse.viirs_nrt,
+        "OLCIS3*_L2_EFR_IOP_NRT": parse.s3_olci_nrt,
+        "S3*_SY_2_SYN": parse.s3_syn,
+    }
+
+    _LOAD_FUNCS = {
+        "VNP09_NRT": xrload.load_viirs_nrt,
+        "OLCIS3*_L2_EFR_IOP_NRT": xrload.load_s3_olci_nrt,
+        "S3*_SY_2_SYN": xrload.load_s3_syn,
+    }
     
     def __init__(self, prod_id: str, geo_prod_id: str|None = None) -> None:
         """
-        Init Downloader with prod_id (es `VNP09_NRT`, `) and geo_prod_id (es `VNP03IMG_NRT`, optional) 
+        Init Loader with prod_id (es `VNP09_NRT`, `) and geo_prod_id (es `VNP03IMG`, optional) 
         
         Parameters:
         - prod_id: str
@@ -38,20 +59,19 @@ class EarthDataDownloader:
         self.prod_id = prod_id
         self.geo_prod_id = geo_prod_id
 
-        self._tstamp = {
-            "VNP09_NRT": lambda g: ''.join(g.data_links()[0].split('/')[-1].split('.')[1:3])[1:],
-            "OLCIS3*_L2_EFR_IOP_NRT": lambda g: g.data_links()[0].split('/')[-1].split('.')[1],
-            "S3*_SY_2_SYN": lambda g: g.data_links()[0].split('/')[-1].split('_')[7],
-        }.get(prod_id.replace("S3A_", "S3*_").replace("S3B_", "S3*_"))
+        self.normalized_prod_id = prod_id.replace("S3A_", "S3*_").replace("S3B_", "S3*_")
 
-        if self._tstamp is None:
-            raise NotImplementedError(f"Date parsing not available for product `{prod_id}`.")
+        assert self.normalized_prod_id in self.AVAILABLE_PRODUCTS, f"Date parsing not available for product `{prod_id}`."
+
+        self._tstamp = self._TSTAMP_PARSERS.get(self.normalized_prod_id)
+        self._load = self._LOAD_FUNCS.get(self.normalized_prod_id)
 
         self._setup_auth()
         
 
     def _setup_auth(self) -> None:
         """Set up NASA Earthdata authentication"""
+
         auth = earthaccess.login()
         if not auth.authenticated:
             raise Exception("Authentication to NASA Earthdata failed.")
@@ -79,7 +99,10 @@ class EarthDataDownloader:
             
         granules = earthaccess.search_data(**search_params)
 
-        if self.geo_prod_id:
+        if not self.geo_prod_id:
+            remote_data = [(g,) for g in granules]
+
+        else:
             search_params.update(short_name=self.geo_prod_id)
                 
             geo_locations = earthaccess.search_data(**search_params)
@@ -94,15 +117,12 @@ class EarthDataDownloader:
                 elif self.geo_prod_id:
                     print(f"skip granule at {tstamp}, no geo_location found")
             
-        else:
-            remote_data = [(g,) for g in granules]
-
         self.remote_data = remote_data
 
         return remote_data
     
 
-    def download(self, output_dir: str|Path, threads: int = 4) -> list[tuple[str]]:
+    def pull(self, output_dir: str|Path, threads: int = 4) -> list[tuple[str]]:
         """
         Download granules to specified directory
         
@@ -130,3 +150,13 @@ class EarthDataDownloader:
 
         return local_data
 
+
+    def load_spectral_bands(self, bounding_box: list[float], resolution: float, epsg_code: str = 'EPSG:4326') -> list:
+
+        timeseries = []
+        for files in self.local_data:
+
+            xds = self._LOAD_FUNCS.get(self.normalized_prod_id)(*files, bounding_box, resolution, epsg_code=epsg_code)
+            timeseries.append(xds)
+
+        return timeseries
