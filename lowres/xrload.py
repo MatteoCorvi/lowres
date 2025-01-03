@@ -1,26 +1,24 @@
-import warnings
 from pyhdf.SD import SD, SDC
-import rioxarray as rxr
+import rioxarray as rxr # load .rio accessor
 import xarray as xr
 import numpy as np
-from rasterio.errors import NotGeoreferencedWarning
 import geopandas as gpd
 from shapely.geometry import box
 
 
+__all__ = ['load_viirs_nrt', 'load_sen3_syn']
 
-def load_viirs_nrt(spectral_data: str, geolocation_data: str, bbox: list[float], resolution: float, *, 
-                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear'):
+
+def load_viirs_nrt(spectral_data_path: str, geolocation_data_path: str, bbox: list[float], resolution: float, *, 
+                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.DataArray:
 
     """
-    Load spectral geolocation and spectral data to xarray dataset.
-    WARNING: Antimeridian case not covered.
+    Load VIIRS geolocation and optical 375m data to xarray DataArray clipped to provided bounding box.
+    WARNING: Antimeridian crossing not covered.
     """
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=NotGeoreferencedWarning)
-        xds = xr.open_dataset(geolocation_data, group='geolocation_data', engine='netcdf4', decode_coords='all')
-        xds = xds.rename({'number_of_lines': 'y', 'number_of_pixels': 'x'})
+    xds = xr.open_dataset(geolocation_data_path, group='geolocation_data', engine='netcdf4', decode_coords='all')
+    xds = xds.rename({'number_of_lines': 'y', 'number_of_pixels': 'x'})
 
     lon_condition = (xds.longitude >= bbox[0]) & (xds.longitude <= bbox[2])
     lat_condition = (xds.latitude >= bbox[1]) & (xds.latitude <= bbox[3])
@@ -35,7 +33,7 @@ def load_viirs_nrt(spectral_data: str, geolocation_data: str, bbox: list[float],
     lon = xds.longitude.isel(x=x_slice, y=y_slice).values
     lat = xds.latitude.isel(x=x_slice, y=y_slice).values
 
-    hdf = SD(spectral_data, SDC.READ)
+    hdf = SD(spectral_data_path, SDC.READ)
 
     bands = ['I1', 'I2', 'I3']
     data = [hdf.select(f'375m Surface Reflectance Band {b}') for b in bands]
@@ -77,10 +75,57 @@ def load_viirs_nrt(spectral_data: str, geolocation_data: str, bbox: list[float],
 
 
 
-def load_s3_olci_nrt():
-    pass
+def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *, 
+                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.DataArray:
 
+    """
+    Load Sentinel-3 OLCI geolocation and optical data to xarray DataArray clipped to provided bounding box.
+    WARNING: Antimeridian case not covered.
+    """
 
+    xds = xr.open_dataset(data_dir_path + '/geolocation.nc', engine='netcdf4', decode_coords='all')
+    xds = xds.rename({'rows': 'y', 'columns': 'x'})
 
-def load_s3_syn():
-    pass
+    lon_condition = (xds.lon >= bbox[0]) & (xds.lon <= bbox[2])
+    lat_condition = (xds.lat >= bbox[1]) & (xds.lat <= bbox[3])
+    condition = lon_condition & lat_condition
+
+    x_matches = np.where(condition.any(dim='y'))[0]
+    y_matches = np.where(condition.any(dim='x'))[0]
+
+    x_slice = slice(x_matches[0] - buffer, x_matches[-1] + 1 + buffer)
+    y_slice = slice(y_matches[0] - buffer, y_matches[-1] + 1 + buffer)
+
+    lon = xds.lon.isel(x=x_slice, y=y_slice).values
+    lat = xds.lat.isel(x=x_slice, y=y_slice).values
+
+    bands = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21]
+    bands = [f'Oa{b:02d}' for b in bands]
+    data = [xr.open_dataset(data_dir_path + f'/Syn_{b}_reflectance.nc', engine='netcdf4', decode_coords='all')['SDR_'+b] for b in bands]
+
+    nodata = np.nan
+    scale_factor = 1e-4
+    add_offset = 0
+
+    xda = (xr
+        .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
+        .isel(x=x_slice, y=y_slice)
+    )
+    xda = (xda
+        .where(xda != nodata)
+        .rio.write_nodata(np.nan, encoded=True)
+    ) * scale_factor + add_offset
+
+    xda = xda.rio.write_crs('EPSG:4326').rio.reproject(
+        dst_crs=epsg_code, 
+        resolution=resolution, 
+        src_geoloc_array=(lon, lat), 
+        georeferencing_convention='PIXEL_CENTER'
+    )
+
+    xda = xda.rio.interpolate_na(method=interp_method)
+    
+    bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
+    xda = xda.rio.clip_box(*bounds)
+
+    return xda

@@ -5,8 +5,7 @@ from earthaccess.results import DataGranule
 
 import numpy as np
 
-from lowres import parse
-from lowres import xrload
+from lowres import products
 
 __all__ = ['EarthDataLoader']
 
@@ -24,47 +23,26 @@ class EarthDataLoader:
 
     Sentinel-3A Synergy Level-2
     edl = EarthDataLoader("S3A_SY_2_SYN")
-
-    Sentinel-3A Olci Level-2 Near Real Time
-    edl = EarthDataLoader("OLCIS3A_L2_EFR_IOP_NRT")
     """
 
-    AVAILABLE_PRODUCTS = [
-        "VNP09_NRT", 
-        "OLCIS3*_L2_EFR_IOP_NRT", 
-        "S3*_SY_2_SYN"
-    ]
-
-    _TSTAMP_PARSERS = {
-        "VNP09_NRT": parse.viirs_nrt,
-        "OLCIS3*_L2_EFR_IOP_NRT": parse.s3_olci_nrt,
-        "S3*_SY_2_SYN": parse.s3_syn,
-    }
-
-    _LOAD_FUNCS = {
-        "VNP09_NRT": xrload.load_viirs_nrt,
-        "OLCIS3*_L2_EFR_IOP_NRT": xrload.load_s3_olci_nrt,
-        "S3*_SY_2_SYN": xrload.load_s3_syn,
+    _PRODUCTS = {
+        "VNP09_NRT": products.VIIRSProduct, 
+        "S3*_SY_2_SYN": products.Sentinel3SYNProduct,
+        "S3A_SY_2_SYN": products.Sentinel3ASYNProduct,
+        "S3B_SY_2_SYN": products.Sentinel3BSYNProduct,
     }
     
-    def __init__(self, prod_id: str, geo_prod_id: str|None = None) -> None:
+    def __init__(self, prod_id: str) -> None:
         """
-        Init Loader with prod_id (es `VNP09_NRT`, `) and geo_prod_id (es `VNP03IMG`, optional) 
+        Init Loader with prod_id (es `VNP09_NRT`, `S3*_SY_2_SYN`)
         
         Parameters:
         - prod_id: str
-        - geo_prod_id: str (optional)
         """
 
-        self.prod_id = prod_id
-        self.geo_prod_id = geo_prod_id
-
-        self.normalized_prod_id = prod_id.replace("S3A_", "S3*_").replace("S3B_", "S3*_")
-
-        assert self.normalized_prod_id in self.AVAILABLE_PRODUCTS, f"Date parsing not available for product `{prod_id}`."
-
-        self._tstamp = self._TSTAMP_PARSERS.get(self.normalized_prod_id)
-        self._load = self._LOAD_FUNCS.get(self.normalized_prod_id)
+        self.product = self._PRODUCTS.get(prod_id)
+        if self.product is None:
+            raise ValueError(f"`{prod_id}` not available for lowres.EarthDataLoader.")
 
         self._setup_auth()
         
@@ -92,29 +70,29 @@ class EarthDataLoader:
         """
         
         search_params = {
-            "short_name": self.prod_id,
+            "short_name": self.product.PROD_ID,
             "temporal": (start_date, end_date),
             "bounding_box": bounding_box,
         }
             
         granules = earthaccess.search_data(**search_params)
 
-        if not self.geo_prod_id:
+        if not self.product.GEO_ID:
             remote_data = [(g,) for g in granules]
 
         else:
-            search_params.update(short_name=self.geo_prod_id)
+            search_params.update(short_name=self.product.GEO_ID)
                 
             geo_locations = earthaccess.search_data(**search_params)
-            geo_locations_dict = {self._tstamp(g): g for g in geo_locations}
+            geo_locations_dict = {self.product.parse_func(g): g for g in geo_locations}
 
             remote_data = []
             for granule in granules:
-                tstamp = self._tstamp(granule)
+                tstamp = self.product.parse_func(granule)
                 geo_location = geo_locations_dict.get(tstamp)
                 if geo_location:
                     remote_data.append((granule, geo_location))
-                elif self.geo_prod_id:
+                elif self.product.GEO_ID:
                     print(f"skip granule at {tstamp}, no geo_location found")
             
         self.remote_data = remote_data
@@ -141,22 +119,35 @@ class EarthDataLoader:
             output_dir,
             threads=threads
         )
-        if self.geo_prod_id:
-            local_data = [tuple(a) for a in np.array(local_data).reshape(-1, 2).tolist()]
+        if self.product.GEO_ID:
+            local_data = [self.product.unzip_func(tuple(a)) for a in np.array(local_data).reshape(-1, 2).tolist()]
         else:
-            local_data = [(f,) for f in local_data]
+            local_data = [(self.product.unzip_func(f),) for f in local_data]
 
         self.local_data = local_data
 
         return local_data
 
 
-    def load_spectral_bands(self, bounding_box: list[float], resolution: float, epsg_code: str = 'EPSG:4326') -> list:
+    def load_optical(self, bounding_box: list[float], resolution: float, epsg_code: str = 'EPSG:4326', **kwargs) -> list:
+        """
+        Load granules into list of xarray DataArrays
+
+        Parameters:
+        - bounding_box: list[float]
+        - resolution: float
+        - epsg_code: str = 'EPSG:4326'
+        - **kwargs: othar keyword arguments to be provided to load functions
+        
+        Returns:
+        - list of xarray DataArrays
+
+        """
 
         timeseries = []
-        for files in self.local_data:
+        for data_path in self.local_data:
 
-            xds = self._LOAD_FUNCS.get(self.normalized_prod_id)(*files, bounding_box, resolution, epsg_code=epsg_code)
-            timeseries.append(xds)
+            xda = self.product.load_func(*data_path, bounding_box, resolution, epsg_code=epsg_code, **kwargs)
+            timeseries.append(xda)
 
         return timeseries
