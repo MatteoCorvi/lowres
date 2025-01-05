@@ -103,18 +103,18 @@ def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *,
     bands = [f'Oa{b:02d}' for b in bands]
     data = [xr.open_dataset(data_dir_path + f'/Syn_{b}_reflectance.nc', engine='netcdf4', decode_coords='all')['SDR_'+b] for b in bands]
 
-    nodata = np.nan
-    scale_factor = 1e-4
-    add_offset = 0
+    #nodata = np.nan
+    #scale_factor = 1e-4
+    #add_offset = 0
 
     xda = (xr
         .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
         .isel(x=x_slice, y=y_slice)
     )
-    xda = (xda
-        .where(xda != nodata)
-        .rio.write_nodata(np.nan, encoded=True)
-    ) * scale_factor + add_offset
+    #xda = (xda
+    #    .where(xda != nodata)
+    xda = xda.rio.write_nodata(np.nan, encoded=True)
+    #) * scale_factor + add_offset
 
     xda = xda.rio.write_crs('EPSG:4326').rio.reproject(
         dst_crs=epsg_code, 

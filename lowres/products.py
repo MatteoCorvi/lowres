@@ -1,32 +1,59 @@
-from dataclasses import dataclass
+import sys
 from typing import Callable, ClassVar
 from zipfile import ZipFile
 from pathlib import Path
+from fnmatch import fnmatch
 
 from lowres import parse, xrload
 
 
 
 __all__ = [
+    'available_product_ids',
     'VIIRSProduct',
-    'Sentinel3SYNProduct',
     'Sentinel3ASYNProduct',
     'Sentinel3BSYNProduct',
-    'Sentinel3CSYNProduct',
-    'Sentinel3DSYNProduct',
 ]
 
 
 
+def _available_products() -> list[str]:
+    """retrieve all product ids from Product classes with non None PROD_ID"""
+    module = sys.modules[__name__]
+    products = []
+    for name in dir(module):
+        obj = getattr(module, name)
+        if hasattr(obj, 'PROD_ID') and obj.PROD_ID:
+            products.append(obj)
+    return products
 
-@dataclass
+
+
+def match_products(patterns: str | list[str]) -> list[str]:
+    """
+    matches patterns [provided ids] against targets [available ids] strings
+    returns: list[SatelliteProduct]
+    """
+    matches = []
+    targets = _available_products()
+    for p in patterns if not isinstance(patterns, str) else [patterns]:
+        matches += [t for t in targets if fnmatch(t.PROD_ID, p)]
+    return matches                
+
+
+
 class SatelliteProduct:
     """Base class for satellite data products"""
     PROD_ID: ClassVar[None] = None
     GEO_ID: ClassVar[None] = None
-    parse_func: ClassVar[Callable] = lambda x: x
-    load_func: ClassVar[Callable] = lambda x: x
-    unzip_func: ClassVar[Callable] = lambda x: x
+    PARSE: ClassVar[Callable] = lambda x: x
+    LOAD: ClassVar[Callable] = lambda x: x
+    UNZIP: ClassVar[Callable] = lambda x: x
+
+    @classmethod
+    def register(self, g):
+        g.product = self
+        return g
 
 
 
@@ -34,24 +61,24 @@ class SatelliteProduct:
 class VIIRSProduct(SatelliteProduct):
     PROD_ID: ClassVar[str] = "VNP09_NRT"
     GEO_ID: ClassVar[str] = "VNP03IMG"
-    parse_func: ClassVar[Callable] = parse.viirs_nrt
-    load_func: ClassVar[Callable] = xrload.load_viirs_nrt
+    PARSE: ClassVar[Callable] = parse.viirs_nrt
+    LOAD: ClassVar[Callable] = xrload.load_viirs_nrt
 
 
 
 
 def unzip_sen3_syn(zip_file):
     out_dir = Path(zip_file).with_suffix('.SEN3')
-    with ZipFile(zip_file, 'r') as zip_ref:
-        zip_ref.extractall(out_dir)
+    if not out_dir.exists():
+        with ZipFile(zip_file, 'r') as zip_ref:
+            zip_ref.extractall(out_dir.parent)
     return str(out_dir)
 
 
 class Sentinel3SYNProduct(SatelliteProduct):
-    PROD_ID: ClassVar[str] = "S3*_SY_2_SYN"
-    parse_func: ClassVar[Callable] = parse.sen3_syn
-    load_func: ClassVar[Callable] = xrload.load_sen3_syn
-    unzip_func: ClassVar[Callable] = unzip_sen3_syn
+    PARSE: ClassVar[Callable] = parse.sen3_syn
+    LOAD: ClassVar[Callable] = xrload.load_sen3_syn
+    UNZIP: ClassVar[Callable] = unzip_sen3_syn
 
 
 class Sentinel3ASYNProduct(Sentinel3SYNProduct):
@@ -61,10 +88,3 @@ class Sentinel3ASYNProduct(Sentinel3SYNProduct):
 class Sentinel3BSYNProduct(Sentinel3SYNProduct):
     PROD_ID: ClassVar[str] = "S3B_SY_2_SYN"
 
-
-class Sentinel3CSYNProduct(Sentinel3SYNProduct):
-    PROD_ID: ClassVar[str] = "S3C_SY_2_SYN"
-
-
-class Sentinel3DSYNProduct(Sentinel3SYNProduct):
-    PROD_ID: ClassVar[str] = "S3D_SY_2_SYN"
