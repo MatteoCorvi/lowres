@@ -8,14 +8,6 @@ from lowres import parse, xrload
 
 
 
-__all__ = [
-    'available_product_ids',
-    'VIIRSProduct',
-    'Sentinel3ASYNProduct',
-    'Sentinel3BSYNProduct',
-]
-
-
 
 def _available_products() -> list[str]:
     """retrieve all product ids from Product classes with non None PROD_ID"""
@@ -52,6 +44,7 @@ class SatelliteProduct:
 
     @classmethod
     def register(self, g):
+        """add class as attribute to earthaccess DataGranule"""
         g.product = self
         return g
 

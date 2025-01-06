@@ -1,6 +1,5 @@
 from earthaccess.results import DataGranule
 
-__all__ = ['viirs_nrt', 'sen3_olci_nrt', 'sen3_syn']
 
 
 def viirs_nrt(g: DataGranule) -> str: 

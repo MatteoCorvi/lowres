@@ -6,7 +6,21 @@ import geopandas as gpd
 from shapely.geometry import box
 
 
-__all__ = ['load_viirs_nrt', 'load_sen3_syn']
+
+def _get_geolocation_slices(lon: xr.DataArray, lat: xr.DataArray, bbox: tuple[float], buffer: int) -> tuple[slice, slice]:
+
+    lon_condition = (lon >= bbox[0]) & (lon <= bbox[2])
+    lat_condition = (lat >= bbox[1]) & (lat <= bbox[3])
+    condition = lon_condition & lat_condition
+
+    x_matches = np.where(condition.any(dim='y'))[0]
+    y_matches = np.where(condition.any(dim='x'))[0]
+
+    x_slice = slice(x_matches[0] - buffer, x_matches[-1] + 1 + buffer)
+    y_slice = slice(y_matches[0] - buffer, y_matches[-1] + 1 + buffer)
+
+    return x_slice, y_slice
+
 
 
 def load_viirs_nrt(spectral_data_path: str, geolocation_data_path: str, bbox: list[float], resolution: float, *, 
@@ -20,15 +34,7 @@ def load_viirs_nrt(spectral_data_path: str, geolocation_data_path: str, bbox: li
     xds = xr.open_dataset(geolocation_data_path, group='geolocation_data', engine='netcdf4', decode_coords='all')
     xds = xds.rename({'number_of_lines': 'y', 'number_of_pixels': 'x'})
 
-    lon_condition = (xds.longitude >= bbox[0]) & (xds.longitude <= bbox[2])
-    lat_condition = (xds.latitude >= bbox[1]) & (xds.latitude <= bbox[3])
-    condition = lon_condition & lat_condition
-
-    x_matches = np.where(condition.any(dim='y'))[0]
-    y_matches = np.where(condition.any(dim='x'))[0]
-
-    x_slice = slice(x_matches[0] - buffer, x_matches[-1] + 1 + buffer)
-    y_slice = slice(y_matches[0] - buffer, y_matches[-1] + 1 + buffer)
+    x_slice, y_slice = _get_geolocation_slices(xds.longitude, xds.latitude, bbox, buffer)
 
     lon = xds.longitude.isel(x=x_slice, y=y_slice).values
     lat = xds.latitude.isel(x=x_slice, y=y_slice).values
@@ -86,15 +92,7 @@ def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *,
     xds = xr.open_dataset(data_dir_path + '/geolocation.nc', engine='netcdf4', decode_coords='all')
     xds = xds.rename({'rows': 'y', 'columns': 'x'})
 
-    lon_condition = (xds.lon >= bbox[0]) & (xds.lon <= bbox[2])
-    lat_condition = (xds.lat >= bbox[1]) & (xds.lat <= bbox[3])
-    condition = lon_condition & lat_condition
-
-    x_matches = np.where(condition.any(dim='y'))[0]
-    y_matches = np.where(condition.any(dim='x'))[0]
-
-    x_slice = slice(x_matches[0] - buffer, x_matches[-1] + 1 + buffer)
-    y_slice = slice(y_matches[0] - buffer, y_matches[-1] + 1 + buffer)
+    x_slice, y_slice = _get_geolocation_slices(xds.lon, xds.lat, bbox, buffer)
 
     lon = xds.lon.isel(x=x_slice, y=y_slice).values
     lat = xds.lat.isel(x=x_slice, y=y_slice).values

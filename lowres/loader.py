@@ -5,10 +5,7 @@ from earthaccess.results import DataGranule
 
 from lowres.products import match_products
 
-__all__ = ['EarthDataLoader']
 
-
-###################################################################################################################
 
 class EarthDataLoader:
     """
