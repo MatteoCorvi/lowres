@@ -1,27 +1,16 @@
 import sys
-from typing import Callable, ClassVar
-from zipfile import ZipFile
-from pathlib import Path
+from typing import ClassVar
 from fnmatch import fnmatch
 
-from lowres import parse, xrload
+from lowres import extract, xrload
 
 
 
 class SatelliteProduct:
     """Base class for satellite data products"""
-    PROD_ID: ClassVar[None] = None
-    GEO_ID: ClassVar[None] = None
-    PARSE: ClassVar[Callable] = lambda x: x
-    LOAD: ClassVar[Callable] = lambda x: x
-    UNZIP: ClassVar[Callable] = lambda x: x
-
-    @classmethod
-    def register(self, g):
-        """monkey patch product as attribute to earthaccess DataGranule"""
-        g.product = self
-        return g
-
+    PROD_ID: ClassVar[str|None] = None
+    GEO_ID: ClassVar[str|None] = None
+    
 
 
 def _available_products() -> list[str]:
@@ -55,24 +44,34 @@ def match_products(patterns: str | list[str]) -> list[str]:
 class VIIRSProduct(SatelliteProduct):
     PROD_ID: ClassVar[str] = "VNP09_NRT"
     GEO_ID: ClassVar[str] = "VNP03IMG"
-    PARSE: ClassVar[Callable] = parse.viirs_nrt
-    LOAD: ClassVar[Callable] = xrload.load_viirs_nrt
 
+    @property
+    def parse(self):
+        return extract.tstamp_viirs_nrt
 
+    @property
+    def unzip(self):
+        return lambda x: x
 
-def unzip_sen3_syn(zip_file):
-    out_dir = Path(zip_file).with_suffix('.SEN3')
-    if not out_dir.exists():
-        with ZipFile(zip_file, 'r') as zip_ref:
-            zip_ref.extractall(out_dir.parent)
-    return str(out_dir)
+    @property
+    def load(self):
+        return xrload.load_viirs_nrt
 
 
 
 class Sentinel3SYNProduct(SatelliteProduct):
-    PARSE: ClassVar[Callable] = parse.sen3_syn
-    LOAD: ClassVar[Callable] = xrload.load_sen3_syn
-    UNZIP: ClassVar[Callable] = unzip_sen3_syn
+
+    @property
+    def parse(self):
+        return extract.tstamp_sen3_syn
+
+    @property
+    def unzip(self):
+        return extract.unzip_sen3_syn
+
+    @property
+    def load(self):
+        return xrload.load_sen3_syn
 
 
 

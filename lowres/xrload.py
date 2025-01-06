@@ -23,13 +23,15 @@ def _get_geolocation_slices(lon: xr.DataArray, lat: xr.DataArray, bbox: tuple[fl
 
 
 
-def load_viirs_nrt(spectral_data_path: str, geolocation_data_path: str, bbox: list[float], resolution: float, *, 
+def load_viirs_nrt(data: list[str, str], bbox: list[float], resolution: float, *, 
                    epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.DataArray:
 
     """
     Load VIIRS geolocation and optical 375m data to xarray DataArray clipped to provided bounding box.
     WARNING: Antimeridian crossing not covered.
     """
+
+    spectral_data_path, geolocation_data_path = data
 
     xds = xr.open_dataset(geolocation_data_path, group='geolocation_data', engine='netcdf4', decode_coords='all')
     xds = xds.rename({'number_of_lines': 'y', 'number_of_pixels': 'x'})

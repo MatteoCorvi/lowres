@@ -4,6 +4,7 @@ import earthaccess
 from earthaccess.results import DataGranule
 
 from lowres.products import match_products
+from lowres.extract import assign_downloads
 
 
 
@@ -28,7 +29,7 @@ class EarthDataLoader:
         - shortnames: str | list[str]
         """
 
-        self.products = match_products(short_names)
+        self.products = [product() for product in match_products(short_names)]
         if not self.products:
             raise ValueError(f"`{short_names}` not available for lowres.EarthDataLoader.")
 
@@ -42,7 +43,8 @@ class EarthDataLoader:
         if not auth.authenticated:
             raise Exception("Authentication to NASA Earthdata failed.")
         self.auth = auth
-    
+
+
 
     def search(self, start_date: str, end_date: str, bounding_box: list[float]) -> list[tuple[DataGranule]]:
         """
@@ -69,33 +71,25 @@ class EarthDataLoader:
                 
             granules = earthaccess.search_data(**search_params)
 
-            if not product.GEO_ID:
-                remote_data = [(product.register(g),) for g in granules]
-
-            else:
+            if product.GEO_ID:
                 search_params.update(short_name=product.GEO_ID)
                     
                 geo_locations = earthaccess.search_data(**search_params)
-                geo_locations_dict = {product.PARSE(g): g for g in geo_locations}
+                geo_locations_dict = {product.parse(g): g for g in geo_locations}
 
-                remote_data = []
                 for granule in granules:
-                    tstamp = product.PARSE(granule)
+                    tstamp = product.parse(granule)
                     geo_location = geo_locations_dict.get(tstamp)
                     if geo_location:
-                        remote_data.append((
-                            product.register(granule), 
-                            product.register(geo_location)
-                        ))
-                    elif product.GEO_ID:
+                        granule['umm']['RelatedUrls'] += geo_location['umm']['RelatedUrls']
+                    else:
                         print(f"skip granule at {tstamp}, no geo_location found")
                 
-            self.granules += remote_data
+            product.granules = granules
 
-            self.granules.sort(key=lambda g: g[0]['umm']['TemporalExtent']['RangeDateTime']['BeginningDateTime'])
-
-        return self.granules
+        return self
     
+
 
     def pull(self, output_dir: str|Path, threads: int = 4) -> list[tuple[str]]:
         """
@@ -111,14 +105,13 @@ class EarthDataLoader:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
     
-        granules = [g for granules in self.granules for g in granules]
+        granules = [g for p in self.products for g in p.granules]
 
         local_data = earthaccess.download(granules, output_dir, threads=threads)
 
-        for granule, local_path in zip(granules, local_data):
-            granule.local_data = granule.product.UNZIP(local_path)
+        assign_downloads(self.products, local_data)
 
-        return [tuple(g.local_data for g in t) for t in self.granules]
+        return self
 
 
     def load_optical(self, bounding_box: list[float], resolution: float, epsg_code: str = 'EPSG:4326', **kwargs) -> list:
@@ -136,11 +129,15 @@ class EarthDataLoader:
 
         """
 
-        timeseries = []
-        for granule in self.granules:
+        for product in self.products:
 
-            data = tuple(g.local_data for g in granule)
-            xda = granule[0].product.LOAD(*data, bounding_box, resolution, epsg_code=epsg_code, **kwargs)
-            timeseries.append(xda)
+            product.timeseries = []
 
-        return timeseries
+            for data in product.local_data:
+
+                print(data)
+
+                xda = product.load(data, bounding_box, resolution, epsg_code=epsg_code, **kwargs)
+                product.timeseries.append(xda)
+
+        return self
