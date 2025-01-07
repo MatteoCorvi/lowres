@@ -7,8 +7,7 @@ import datetime as dt
 from lowres.loader import EarthDataLoader
 
 # Initialize loader
-loader = EarthDataLoader("VNP09_NRT", geo_prod_id="VNP03IMG")
-#loader = EarthDataLoader("S3B_SY_2_SYN")
+loader = EarthDataLoader("VNP09_NRT", "S3*_SY_2_SYN")
 
 # Set search parameters
 bounding_box = 7.8536809883066230, 44.6328246340051535, 12.0651228253536811, 45.5482371795341479
