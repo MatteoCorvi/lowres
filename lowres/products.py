@@ -13,9 +13,9 @@ class SatelliteProduct:
     
 
 
-def _available_products() -> list[str]:
+def _available_products(module_name: str = __name__) -> list[str]:
     """retrieve all product ids from Product classes with non None PROD_ID"""
-    module = sys.modules[__name__]
+    module = sys.modules[module_name]
     products = []
     for name in dir(module):
         obj = getattr(module, name)
@@ -28,22 +28,34 @@ def _available_products() -> list[str]:
 
 
 
-def match_products(patterns: str | list[str]) -> list[str]:
+def match_products(patterns: str | list[str], module_name: str = __name__) -> list[str]:
     """
     matches patterns [provided ids] against targets [available ids] strings
+    search patterns are normalized
     returns: list[SatelliteProduct]
     """
+    def check(ins):
+        if ins is None: raise TypeError('`None` is not valid pattern input')
+        if not ins: raise ValueError('Empty list or string is not valid pattern input')
+
+    check(patterns)
+
     matches = []
-    targets = _available_products()
+    targets = _available_products(module_name)
+    targets = [(t, t.PROD_ID.upper(), t.__name__.upper()) for t in targets]
+
     for p in patterns if not isinstance(patterns, str) else [patterns]:
-        matches += [t for t in targets if fnmatch(t.PROD_ID, p)]
+        check(p)
+        p_norm = p.upper()
+        for t, id_norm, n_norm in targets:
+            if fnmatch(id_norm, p_norm) or fnmatch(n_norm, p_norm):
+                matches.append(t)
+                
     return matches                
 
 
 
-class VIIRSProduct(SatelliteProduct):
-    PROD_ID: ClassVar[str] = "VNP09_NRT"
-    GEO_ID: ClassVar[str] = "VNP03IMG"
+class VIIRS_Product(SatelliteProduct):
 
     @property
     def parse(self):
@@ -58,8 +70,43 @@ class VIIRSProduct(SatelliteProduct):
         return xrload.load_viirs_nrt
 
 
+class VIIRS_NPP_NRT_Product(VIIRS_Product):
+    """
+    VIIRS/NPP Atmospherically Corrected Surface Reflectance 
+    6-Min L2 Swath 375m, 750m - Near Real Time
+    """
+    PROD_ID: ClassVar[str] = "VNP09_NRT"
+    GEO_ID: ClassVar[str] = "VNP03IMG_NRT"
 
-class Sentinel3SYNProduct(SatelliteProduct):
+
+class VIIRS_JPSS1_NRT_Product(VIIRS_Product):
+    """
+    VIIRS/JPSS1 Atmospherically Corrected Surface Reflectance 
+    6-Min L2 Swath 375m, 750m - Near Real Time
+    """
+    PROD_ID: ClassVar[str] = "VJ109_NRT"
+    GEO_ID: ClassVar[str] = "VJ103IMG_NRT"
+
+
+class VIIRS_NPP_STD_Product(VIIRS_Product):
+    """
+    VIIRS/NPP Atmospherically Corrected Surface Reflectance 
+    6-Min L2 Swath 375m, 750m - Standard Science Product
+    """
+    PROD_ID: ClassVar[str] = "VNP09"
+    GEO_ID: ClassVar[str] = "VNP03IMG"
+
+
+class VIIRS_JPSS1_STD_Product(VIIRS_Product):
+    """
+    VIIRS/JPSS1 Atmospherically Corrected Surface Reflectance 
+    6-Min L2 Swath 375m, 750m - Standard Science Product
+    """
+    PROD_ID: ClassVar[str] = "VJ109"
+    GEO_ID: ClassVar[str] = "VJ103IMG"
+
+
+class Sentinel3_SYN_Product(SatelliteProduct):
 
     @property
     def parse(self):
@@ -74,12 +121,10 @@ class Sentinel3SYNProduct(SatelliteProduct):
         return xrload.load_sen3_syn
 
 
-
-class Sentinel3ASYNProduct(Sentinel3SYNProduct):
+class Sentinel3A_SYN_Product(Sentinel3_SYN_Product):
     PROD_ID: ClassVar[str] = "S3A_SY_2_SYN"
 
 
-
-class Sentinel3BSYNProduct(Sentinel3SYNProduct):
+class Sentinel3B_SYN_Product(Sentinel3_SYN_Product):
     PROD_ID: ClassVar[str] = "S3B_SY_2_SYN"
 
