@@ -4,11 +4,11 @@ from earthaccess.results import DataGranule
 
 
 
-def tstamp_viirs_nrt(g: DataGranule) -> str: 
+def tstamp_viirs(g: DataGranule) -> str: 
     return ''.join(g.data_links()[0].split('/')[-1].split('.')[1:3])[1:]
 
 
-def tstamp_sen3_olci_nrt(g: DataGranule) -> str: 
+def tstamp_sen3_olci(g: DataGranule) -> str: 
     return g.data_links()[0].split('/')[-1].split('.')[1]
 
 

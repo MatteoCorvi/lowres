@@ -23,7 +23,7 @@ def _get_geolocation_slices(lon: xr.DataArray, lat: xr.DataArray, bbox: tuple[fl
 
 
 
-def load_viirs_nrt(data: list[str, str], bbox: list[float], resolution: float, *, 
+def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *, 
                    epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.DataArray:
 
     """
@@ -88,7 +88,7 @@ def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *,
 
     """
     Load Sentinel-3 OLCI geolocation and optical data to xarray DataArray clipped to provided bounding box.
-    WARNING: Antimeridian case not covered.
+    WARNING: Antimeridian crossing not covered.
     """
 
     xds = xr.open_dataset(data_dir_path + '/geolocation.nc', engine='netcdf4', decode_coords='all')

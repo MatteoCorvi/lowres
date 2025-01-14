@@ -14,16 +14,13 @@ class EarthDataLoader:
 
     Examples:
 
-    VIIRS Near Real Time
-    edl = EarthDataLoader("VNP09_NRT", geo_prod_id="VNP03IMG")
-
-    Sentinel-3A Synergy Level-2
-    edl = EarthDataLoader("S3A_SY_2_SYN")
+    Sentinel-3A Synergy and VIIRS Level-2
+    loader = EarthDataLoader("Sentinel3*", "VIIRS*STD*")
     """
     
     def __init__(self, *short_names: str | list[str]) -> None:
         """
-        Init Loader with product shortnames (es `VNP09_NRT`, `S3*_SY_2_SYN`)
+        Init Loader with class names or earthdata search product shortnames)
         
         Parameters:
         - shortnames: str | list[str]

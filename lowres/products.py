@@ -59,7 +59,7 @@ class VIIRS_Product(SatelliteProduct):
 
     @property
     def parse(self):
-        return extract.tstamp_viirs_nrt
+        return extract.tstamp_viirs
 
     @property
     def unzip(self):
@@ -67,7 +67,7 @@ class VIIRS_Product(SatelliteProduct):
 
     @property
     def load(self):
-        return xrload.load_viirs_nrt
+        return xrload.load_viirs
 
 
 class VIIRS_NPP_NRT_Product(VIIRS_Product):
