@@ -1,8 +1,10 @@
+import os
 from pyhdf.SD import SD, SDC
-import rioxarray as rxr # load .rio accessor
-import xarray as xr
 import numpy as np
 import geopandas as gpd
+import rioxarray as rxr # load .rio accessor
+import xarray as xr
+from geocube.api.core import make_geocube
 from shapely.geometry import box
 
 
@@ -24,7 +26,7 @@ def _get_geolocation_slices(lon: xr.DataArray, lat: xr.DataArray, bbox: tuple[fl
 
 
 def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *, 
-                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.DataArray:
+                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.Dataset:
 
     """
     Load VIIRS geolocation and optical 375m data to xarray DataArray clipped to provided bounding box.
@@ -33,13 +35,13 @@ def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *,
 
     spectral_data_path, geolocation_data_path = data
 
-    xds = xr.open_dataset(geolocation_data_path, group='geolocation_data', engine='netcdf4', decode_coords='all')
-    xds = xds.rename({'number_of_lines': 'y', 'number_of_pixels': 'x'})
+    geo_xds = xr.open_dataset(geolocation_data_path, group='geolocation_data', engine='netcdf4', decode_coords='all')
+    geo_xds = geo_xds.rename({'number_of_lines': 'y', 'number_of_pixels': 'x'})
 
-    x_slice, y_slice = _get_geolocation_slices(xds.longitude, xds.latitude, bbox, buffer)
+    x_slice, y_slice = _get_geolocation_slices(geo_xds.longitude, geo_xds.latitude, bbox, buffer)
 
-    lon = xds.longitude.isel(x=x_slice, y=y_slice).values
-    lat = xds.latitude.isel(x=x_slice, y=y_slice).values
+    lon = geo_xds.longitude.isel(x=x_slice, y=y_slice).values
+    lat = geo_xds.latitude.isel(x=x_slice, y=y_slice).values
 
     hdf = SD(spectral_data_path, SDC.READ)
 
@@ -58,74 +60,92 @@ def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *,
     assert len(add_offset) == 1, 'Multiple `add_offset` in band datasets'
     add_offset = list(add_offset)[0]
 
-    xda = (xr
+    angles_map = {'sensor_azimuth': 'vaa', 'sensor_zenith': 'vza', 'solar_azimuth': 'saa', 'solar_zenith': 'sza'}
+    ang = geo_xds.rename(angles_map)[['vaa', 'vza']]
+
+    sr = (xr
         .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
         .isel(x=x_slice, y=y_slice)
     )
-    xda = (xda
-        .where(xda != nodata)
+    
+    sr = (sr
+        .where(sr != nodata)
         .rio.write_nodata(np.nan, encoded=True)
     ) * scale_factor + add_offset
 
-    xda = xda.rio.write_crs('EPSG:4326').rio.reproject(
+    sr = sr.rio.write_crs('EPSG:4326').rio.reproject(
         dst_crs=epsg_code, 
         resolution=resolution, 
         src_geoloc_array=(lon, lat), 
         georeferencing_convention='PIXEL_CENTER'
     )
 
-    xda = xda.rio.interpolate_na(method=interp_method)
+    sr = sr.rio.interpolate_na(method=interp_method)
     
     bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
-    xda = xda.rio.clip_box(*bounds)
+    sr = sr.rio.clip_box(*bounds)
 
-    return xda
+    return sr
 
 
 
 def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *, 
-                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.DataArray:
+                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.Dataset:
 
     """
     Load Sentinel-3 OLCI geolocation and optical data to xarray DataArray clipped to provided bounding box.
     WARNING: Antimeridian crossing not covered.
     """
 
-    xds = xr.open_dataset(data_dir_path + '/geolocation.nc', engine='netcdf4', decode_coords='all')
-    xds = xds.rename({'rows': 'y', 'columns': 'x'})
+    geo_xds = xr.open_dataset(data_dir_path + '/geolocation.nc', engine='netcdf4', decode_coords='all')
+    geo_xds = geo_xds.rename({'rows': 'y', 'columns': 'x'})
 
-    x_slice, y_slice = _get_geolocation_slices(xds.lon, xds.lat, bbox, buffer)
+    x_slice, y_slice = _get_geolocation_slices(geo_xds.lon, geo_xds.lat, bbox, buffer)
 
-    lon = xds.lon.isel(x=x_slice, y=y_slice).values
-    lat = xds.lat.isel(x=x_slice, y=y_slice).values
+    lon = geo_xds.lon.isel(x=x_slice, y=y_slice).values
+    lat = geo_xds.lat.isel(x=x_slice, y=y_slice).values
 
     bands = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21]
     bands = [f'Oa{b:02d}' for b in bands]
-    data = [xr.open_dataset(data_dir_path + f'/Syn_{b}_reflectance.nc', engine='netcdf4', decode_coords='all')['SDR_'+b] for b in bands]
+    data = [xr.open_dataset(os.path.join(data_dir_path, f'Syn_{b}_reflectance.nc'), engine='netcdf4', decode_coords='all')['SDR_'+b] for b in bands]
+
+    sr = (xr
+        .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
+        .isel(x=x_slice, y=y_slice)
+    )
 
     #nodata = np.nan
     #scale_factor = 1e-4
     #add_offset = 0
 
-    xda = (xr
-        .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
-        .isel(x=x_slice, y=y_slice)
-    )
-    #xda = (xda
-    #    .where(xda != nodata)
-    xda = xda.rio.write_nodata(np.nan, encoded=True)
+    #xds = (xds
+    #    .where(xds != nodata)
+    sr = sr.rio.write_nodata(np.nan, encoded=True)
     #) * scale_factor + add_offset
 
-    xda = xda.rio.write_crs('EPSG:4326').rio.reproject(
+    sr = sr.rio.write_crs('EPSG:4326').rio.reproject(
         dst_crs=epsg_code, 
         resolution=resolution, 
         src_geoloc_array=(lon, lat), 
         georeferencing_convention='PIXEL_CENTER'
     )
 
-    xda = xda.rio.interpolate_na(method=interp_method)
-    
-    bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
-    xda = xda.rio.clip_box(*bounds)
+    sr = sr.rio.interpolate_na(method=interp_method)
 
-    return xda
+    bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
+    sr = sr.rio.clip_box(*bounds)
+    
+    var_map = {'OLC_TP_lon': 'lon', 'OLC_TP_lat': 'lat', 'OLC_VAA': 'vaa', 'OLC_VZA': 'vza', 'SAA': 'saa', 'SZA': 'sza'}
+    ang = xr.open_dataset(data_dir_path + '/tiepoints_olci.nc', engine='netcdf4', decode_coords='all').rename(var_map)[['vaa', 'vza']]
+    gs = gpd.GeoSeries.from_xy(ang.lon.values, ang.lat.values, crs='EPSG:4326')
+    ang = ang.drop_vars(['lon', 'lat'])
+    gdf = gpd.GeoDataFrame(ang.to_dataframe(), geometry=gs).to_crs(epsg_code)
+    buf_bounds = gpd.GeoSeries([box(*bounds)], crs=epsg_code).buffer(1e5, join_style='mitre')
+    gdf = gdf[gdf.geometry.within(buf_bounds.values[0])]
+
+    xds = make_geocube(vector_data=gdf, resolution=(-resolution, resolution), interpolate_na_method=interp_method)
+    xds = xds.rio.reproject_match(sr)
+
+    xds['sr'] = sr
+
+    return xds
