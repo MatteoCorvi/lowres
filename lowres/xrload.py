@@ -61,31 +61,32 @@ def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *,
     add_offset = list(add_offset)[0]
 
     angles_map = {'sensor_azimuth': 'vaa', 'sensor_zenith': 'vza', 'solar_azimuth': 'saa', 'solar_zenith': 'sza'}
-    ang = geo_xds.rename(angles_map)[['vaa', 'vza']]
+    xds = geo_xds.rename(angles_map)[['vaa', 'vza']].isel(x=x_slice, y=y_slice)
 
     sr = (xr
         .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
         .isel(x=x_slice, y=y_slice)
     )
-    
     sr = (sr
         .where(sr != nodata)
         .rio.write_nodata(np.nan, encoded=True)
     ) * scale_factor + add_offset
 
-    sr = sr.rio.write_crs('EPSG:4326').rio.reproject(
-        dst_crs=epsg_code, 
-        resolution=resolution, 
-        src_geoloc_array=(lon, lat), 
-        georeferencing_convention='PIXEL_CENTER'
-    )
-
-    sr = sr.rio.interpolate_na(method=interp_method)
+    xds['sr'] = sr
     
     bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
-    sr = sr.rio.clip_box(*bounds)
+    
+    xds = (xds
+        .rio.write_crs('EPSG:4326').rio.reproject(
+            dst_crs=epsg_code, 
+            resolution=resolution, 
+            src_geoloc_array=(lon, lat), 
+            georeferencing_convention='PIXEL_CENTER'
+        )
+        .rio.interpolate_na(method=interp_method)
+        .rio.clip_box(*bounds))
 
-    return sr
+    return xds
 
 
 
@@ -133,14 +134,15 @@ def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *,
     sr = sr.rio.interpolate_na(method=interp_method)
 
     bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
+    buf_bounds = gpd.GeoSeries([box(*bounds)], crs=epsg_code).buffer(1e5, join_style='mitre')
     sr = sr.rio.clip_box(*bounds)
     
     var_map = {'OLC_TP_lon': 'lon', 'OLC_TP_lat': 'lat', 'OLC_VAA': 'vaa', 'OLC_VZA': 'vza', 'SAA': 'saa', 'SZA': 'sza'}
     ang = xr.open_dataset(data_dir_path + '/tiepoints_olci.nc', engine='netcdf4', decode_coords='all').rename(var_map)[['vaa', 'vza']]
     gs = gpd.GeoSeries.from_xy(ang.lon.values, ang.lat.values, crs='EPSG:4326')
+
     ang = ang.drop_vars(['lon', 'lat'])
     gdf = gpd.GeoDataFrame(ang.to_dataframe(), geometry=gs).to_crs(epsg_code)
-    buf_bounds = gpd.GeoSeries([box(*bounds)], crs=epsg_code).buffer(1e5, join_style='mitre')
     gdf = gdf[gdf.geometry.within(buf_bounds.values[0])]
 
     xds = make_geocube(vector_data=gdf, resolution=(-resolution, resolution), interpolate_na_method=interp_method)
