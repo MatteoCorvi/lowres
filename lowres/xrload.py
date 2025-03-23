@@ -16,15 +16,15 @@ def _get_geolocation_slices(lon: xr.DataArray, lat: xr.DataArray, bbox: tuple[fl
     x_matches = np.where(condition.any(dim='y'))[0]
     y_matches = np.where(condition.any(dim='x'))[0]
 
-    x_slice = slice(x_matches[0] - buffer, x_matches[-1] + 1 + buffer)
-    y_slice = slice(y_matches[0] - buffer, y_matches[-1] + 1 + buffer)
+    x_slice = slice(max(x_matches[0] - buffer, 0), x_matches[-1] + 1 + buffer)
+    y_slice = slice(max(y_matches[0] - buffer, 0), y_matches[-1] + 1 + buffer)
 
     return x_slice, y_slice
 
 
 
-def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *, 
-                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.DataArray:
+def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *, viirs_bands: tuple[int] = (1, 2, 3),
+                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear', **kwargs) -> xr.DataArray:
 
     """
     Load VIIRS geolocation and optical 375m data to xarray DataArray clipped to provided bounding box.
@@ -43,7 +43,7 @@ def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *,
 
     hdf = SD(spectral_data_path, SDC.READ)
 
-    bands = ['I1', 'I2', 'I3']
+    bands = [f"I{b}" for b in viirs_bands]
     data = [hdf.select(f'375m Surface Reflectance Band {b}') for b in bands]
 
     nodata = set(ds.attributes()['_FillValue'] for ds in data)
@@ -84,7 +84,8 @@ def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *,
 
 
 def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *, 
-                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear') -> xr.DataArray:
+                   sen3_bands: tuple[int] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21),
+                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear', **kwargs) -> xr.DataArray:
 
     """
     Load Sentinel-3 OLCI geolocation and optical data to xarray DataArray clipped to provided bounding box.
@@ -99,8 +100,7 @@ def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *,
     lon = xds.lon.isel(x=x_slice, y=y_slice).values
     lat = xds.lat.isel(x=x_slice, y=y_slice).values
 
-    bands = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21]
-    bands = [f'Oa{b:02d}' for b in bands]
+    bands = [f'Oa{b:02d}' for b in sen3_bands]
     data = [xr.open_dataset(data_dir_path + f'/Syn_{b}_reflectance.nc', engine='netcdf4', decode_coords='all')['SDR_'+b] for b in bands]
 
     #nodata = np.nan

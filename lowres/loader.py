@@ -6,6 +6,7 @@ from earthaccess.results import DataGranule
 from lowres.products import match_products
 from lowres.extract import assign_downloads
 
+import xarray as xr
 
 
 class EarthDataLoader:
@@ -111,20 +112,48 @@ class EarthDataLoader:
         return self
 
 
-    def load_optical(self, bounding_box: list[float], resolution: float, epsg_code: str = 'EPSG:4326', **kwargs) -> list:
+    def load_optical(self, bounding_box: list[float], resolution: float, *, 
+                     viirs_bands: tuple[int] = (1, 2, 3),
+                     sen3_bands: tuple[int] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21),
+                     epsg_code: str = 'EPSG:4326', 
+                     buffer: int = 20, 
+                     interp_method: str = 'linear',
+                     ) -> list[xr.DataArray]:
         """
         Load granules into list of xarray DataArrays
-
-        Parameters:
-        - bounding_box: list[float]
-        - resolution: float
-        - epsg_code: str = 'EPSG:4326'
-        - **kwargs: othar keyword arguments to be provided to load functions
+    
+        Parameters
+        - bounding_box : list[float]
+            Geographic coordinates defining the area of interest [min_lon, min_lat, max_lon, max_lat].
+        - resolution : float
+            Spatial resolution in the units of the specified coordinate system.
         
-        Returns:
-        - list of xarray DataArrays
+        Keyword Arguments
+        - viirs_bands : tuple[int], optional
+            VIIRS satellite bands to retrieve, by default (1, 2, 3).
+        - sen3_bands : tuple[int], optional
+            Sentinel-3 satellite bands to retrieve, by default 
+            (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21).
+        - epsg_code : str, optional
+            Target coordinate reference system code, by default 'EPSG:4326' (WGS84).
+        - buffer : int, optional
+            index buffering (over row col dimensions) when slicing around the bounding box, by default 20.
+        - interp_method : str, optional
+            Method used for interpolation during resampling, by default 'linear'.
+            Other options may include 'nearest', 'cubic', etc.
+    
+        Returns
+        - List containing the loaded xarray data arrays for the specified bands.
 
         """
+
+        kwargs = dict(
+            viirs_bands=viirs_bands,
+            sen3_bands=sen3_bands,
+            epsg_code=epsg_code, 
+            buffer=buffer,
+            interp_method=interp_method,
+        )
 
         for product in self.products:
 
@@ -133,8 +162,10 @@ class EarthDataLoader:
             for data in product.local_data:
 
                 print(data)
-
-                xda = product.load(data, bounding_box, resolution, epsg_code=epsg_code, **kwargs)
-                product.timeseries.append(xda)
+                try:
+                    xda = product.load(data, bounding_box, resolution, **kwargs)
+                    product.timeseries.append(xda)
+                except Exception as e:
+                    print(f"{type(e).__name__}: {e}")
 
         return self
