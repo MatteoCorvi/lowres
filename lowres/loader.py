@@ -43,7 +43,6 @@ class EarthDataLoader:
         self.auth = auth
 
 
-
     def search(self, start_date: str, end_date: str, bounding_box: list[float]) -> list[tuple[DataGranule]]:
         """
         Search for granules
@@ -85,8 +84,11 @@ class EarthDataLoader:
                 
             product.granules = granules
 
-        return self
-    
+        for p in self.products:
+            for g in p.granules:
+                for urldict in g['umm']['RelatedUrls']:
+                    if urldict['Type']=='GET DATA':
+                        print(urldict['URL'].split('/')[-1])
 
 
     def pull(self, output_dir: str|Path, threads: int = 4) -> list[tuple[str]]:
@@ -108,8 +110,6 @@ class EarthDataLoader:
         local_data = earthaccess.download(granules, output_dir, threads=threads)
 
         assign_downloads(self.products, local_data)
-
-        return self
 
 
     def load_optical(self, bounding_box: list[float], resolution: float, *, 
@@ -174,5 +174,7 @@ class EarthDataLoader:
                 except Exception as e:
                     print(f"{type(e).__name__}: {e}")
                     results[product.PROD_ID].append(e)
+
+        self.results = results
 
         return results
