@@ -114,13 +114,14 @@ class EarthDataLoader:
 
     def load_optical(self, bounding_box: list[float], resolution: float, *, 
                      viirs_bands: tuple[int] = (1, 2, 3),
-                     sen3_bands: tuple[int] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21),
+                     syn_sdr_bands: tuple[int] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21),
+                     syn_flags: tuple[str] = ('CLOUD_flags', 'OLC_flags'),
                      epsg_code: str = 'EPSG:4326', 
                      buffer: int = 20, 
-                     interp_method: str = 'linear',
-                     ) -> list[xr.DataArray]:
+                     **reproj_kwargs,
+                     ) -> dict[str, list[xr.Dataset]]:
         """
-        Load granules into list of xarray DataArrays
+        Load granules into lists of xarray Datasets per product id
     
         Parameters
         - bounding_box : list[float]
@@ -131,41 +132,47 @@ class EarthDataLoader:
         Keyword Arguments
         - viirs_bands : tuple[int], optional
             VIIRS satellite bands to retrieve, by default (1, 2, 3).
-        - sen3_bands : tuple[int], optional
-            Sentinel-3 satellite bands to retrieve, by default 
+        - syn_sdr_bands : tuple[int], optional
+            Sentinel-3 optical satellite bands to retrieve, by default
             (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21).
+        - syn_flags: tuple[str], optional
+            Sentinel-3 flags bands by default (CLOUD_flags, OLC_flags). 
+            Also available SLN_flags, SLO_flags, SYN_flags.
         - epsg_code : str, optional
             Target coordinate reference system code, by default 'EPSG:4326' (WGS84).
         - buffer : int, optional
             index buffering (over row col dimensions) when slicing around the bounding box, by default 20.
-        - interp_method : str, optional
-            Method used for interpolation during resampling, by default 'linear'.
-            Other options may include 'nearest', 'cubic', etc.
-    
+        - reproj_kwargs : optional
+            keyword arguments to pass on rioxarray reproject
+            
         Returns
-        - List containing the loaded xarray data arrays for the specified bands.
+        - dictionary PROD_IDs as keys and lists of loaded xarray datasets as values.
 
         """
 
         kwargs = dict(
             viirs_bands=viirs_bands,
-            sen3_bands=sen3_bands,
+            syn_sdr_bands=syn_sdr_bands,
+            syn_flags=syn_flags,
             epsg_code=epsg_code, 
             buffer=buffer,
-            interp_method=interp_method,
+            **reproj_kwargs
         )
+
+        results = {}
 
         for product in self.products:
 
-            product.timeseries = []
+            results[product.PROD_ID] = []
 
             for data in product.local_data:
 
                 print(data)
                 try:
                     xda = product.load(data, bounding_box, resolution, **kwargs)
-                    product.timeseries.append(xda)
+                    results[product.PROD_ID].append(xda)
                 except Exception as e:
                     print(f"{type(e).__name__}: {e}")
+                    results[product.PROD_ID].append(e)
 
-        return self
+        return results

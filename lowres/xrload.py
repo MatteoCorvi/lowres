@@ -84,48 +84,55 @@ def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *, vi
 
 
 def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *, 
-                   sen3_bands: tuple[int] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21),
-                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear', **kwargs) -> xr.DataArray:
+                   syn_sdr_bands: tuple[int] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21),
+                   syn_flags: tuple[str] = ('CLOUD_flags', 'OLC_flags'),
+                   epsg_code: str = 'EPSG:4326', buffer: int = 20, **reproj_kwargs) -> xr.Dataset:
 
     """
-    Load Sentinel-3 OLCI geolocation and optical data to xarray DataArray clipped to provided bounding box.
+    Load Sentinel-3 SYN-OLCI geolocation and optical data to xarray Dataset clipped to provided bounding box.
     WARNING: Antimeridian crossing not covered.
     """
 
-    xds = xr.open_dataset(data_dir_path + '/geolocation.nc', engine='netcdf4', decode_coords='all')
-    xds = xds.rename({'rows': 'y', 'columns': 'x'})
+    xds_geo = xr.open_dataset(data_dir_path + '/geolocation.nc', engine='netcdf4', decode_coords='all')[['lat', 'lon']]
+    xds_geo = xds_geo.rename({'rows': 'y', 'columns': 'x'})
 
-    x_slice, y_slice = _get_geolocation_slices(xds.lon, xds.lat, bbox, buffer)
+    x_slice, y_slice = _get_geolocation_slices(xds_geo.lon, xds_geo.lat, bbox, buffer)
 
-    lon = xds.lon.isel(x=x_slice, y=y_slice).values
-    lat = xds.lat.isel(x=x_slice, y=y_slice).values
+    lon = xds_geo.lon.isel(x=x_slice, y=y_slice).values
+    lat = xds_geo.lat.isel(x=x_slice, y=y_slice).values
 
-    bands = [f'Oa{b:02d}' for b in sen3_bands]
+    bands = [f'Oa{b:02d}' for b in syn_sdr_bands]
     data = [xr.open_dataset(data_dir_path + f'/Syn_{b}_reflectance.nc', engine='netcdf4', decode_coords='all')['SDR_'+b] for b in bands]
 
     #nodata = np.nan
     #scale_factor = 1e-4
     #add_offset = 0
 
-    xda = (xr
+    xda_sdr = (xr
         .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
         .isel(x=x_slice, y=y_slice)
     )
     #xda = (xda
     #    .where(xda != nodata)
-    xda = xda.rio.write_nodata(np.nan, encoded=True)
+    xda_sdr = xda_sdr.rio.write_nodata(np.nan, encoded=True)
     #) * scale_factor + add_offset
 
-    xda = xda.rio.write_crs('EPSG:4326').rio.reproject(
+    xds_flags = xr.open_dataset(data_dir_path + '/flags.nc', engine='netcdf4', decode_coords='all')[list(syn_flags)]
+    xds_flags = xds_flags.rename({'rows': 'y', 'columns': 'x'}).isel(x=x_slice, y=y_slice)
+
+    xds = xr.Dataset(dict(SDR=xda_sdr, **xds_flags))
+
+    xds = xds.rio.write_crs('EPSG:4326').rio.reproject(
         dst_crs=epsg_code, 
         resolution=resolution, 
         src_geoloc_array=(lon, lat), 
-        georeferencing_convention='PIXEL_CENTER'
+        georeferencing_convention='PIXEL_CENTER',
+        **reproj_kwargs
     )
 
-    xda = xda.rio.interpolate_na(method=interp_method)
+    #xda = xda.rio.interpolate_na(method=interp_method)
     
     bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
-    xda = xda.rio.clip_box(*bounds)
+    xds = xds.rio.clip_box(*bounds)
 
-    return xda
+    return xds
