@@ -23,7 +23,7 @@ def _get_geolocation_slices(lon: xr.DataArray, lat: xr.DataArray, bbox: tuple[fl
 
 
 
-def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *, viirs_bands: tuple[int] = (1, 2, 3),
+def load_viirs_to_raster(data: list[str, str], bbox: list[float], resolution: float, *, viirs_bands: tuple[int] = (1, 2, 3),
                    epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear', **kwargs) -> xr.DataArray:
 
     """
@@ -83,7 +83,7 @@ def load_viirs(data: list[str, str], bbox: list[float], resolution: float, *, vi
 
 
 
-def load_sen3_syn(data_dir_path: str, bbox: list[float], resolution: float, *, 
+def load_sen3_syn_to_raster(data_dir_path: str, bbox: list[float], resolution: float, *, 
                    syn_sdr_bands: tuple[int] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 16, 17, 18, 21),
                    syn_flags: tuple[str] = ('CLOUD_flags', 'OLC_flags'),
                    epsg_code: str = 'EPSG:4326', buffer: int = 20, **reproj_kwargs) -> xr.Dataset:

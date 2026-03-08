@@ -57,17 +57,9 @@ def match_products(patterns: str | list[str], module_name: str = __name__) -> li
 
 class VIIRS_Product(SatelliteProduct):
 
-    @property
-    def parse(self):
-        return extract.tstamp_viirs
-
-    @property
-    def unzip(self):
-        return lambda x: x
-
-    @property
-    def load(self):
-        return xrload.load_viirs
+    parse = staticmethod(extract.tstamp_viirs)
+    unzip = staticmethod(lambda x: x)
+    load = staticmethod(xrload.load_viirs_to_raster)
 
 
 class VIIRS_NPP_NRT_Product(VIIRS_Product):
@@ -108,17 +100,9 @@ class VIIRS_JPSS1_STD_Product(VIIRS_Product):
 
 class Sentinel3_SYN_Product(SatelliteProduct):
 
-    @property
-    def parse(self):
-        return extract.tstamp_sen3_syn
-
-    @property
-    def unzip(self):
-        return extract.unzip_sen3_syn
-
-    @property
-    def load(self):
-        return xrload.load_sen3_syn
+    parse = staticmethod(extract.tstamp_sen3_syn)
+    unzip = staticmethod(extract.unzip_sen3_syn)
+    load = staticmethod(xrload.load_sen3_syn_to_raster)
 
 
 class Sentinel3A_SYN_Product(Sentinel3_SYN_Product):
