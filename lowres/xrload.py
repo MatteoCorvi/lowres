@@ -24,7 +24,7 @@ def _get_geolocation_slices(lon: xr.DataArray, lat: xr.DataArray, bbox: tuple[fl
 
 
 def load_viirs_to_raster(data: list[str, str], bbox: list[float], resolution: float, *, viirs_bands: tuple[int] = (1, 2, 3),
-                   epsg_code: str = 'EPSG:4326', buffer: int = 20, interp_method: str = 'linear', **kwargs) -> xr.DataArray:
+                   epsg_code: str = 'EPSG:4326', buffer: int = 20, **reproj_kwargs) -> xr.DataArray:
 
     """
     Load VIIRS geolocation and optical 375m data to xarray DataArray clipped to provided bounding box.
@@ -41,7 +41,7 @@ def load_viirs_to_raster(data: list[str, str], bbox: list[float], resolution: fl
     lon = xds.longitude.isel(x=x_slice, y=y_slice).values
     lat = xds.latitude.isel(x=x_slice, y=y_slice).values
 
-    hdf = SD(spectral_data_path, SDC.READ)
+    hdf = SD(str(spectral_data_path), SDC.READ)
 
     bands = [f"I{b}" for b in viirs_bands]
     data = [hdf.select(f'375m Surface Reflectance Band {b}') for b in bands]
@@ -58,28 +58,36 @@ def load_viirs_to_raster(data: list[str, str], bbox: list[float], resolution: fl
     assert len(add_offset) == 1, 'Multiple `add_offset` in band datasets'
     add_offset = list(add_offset)[0]
 
-    xda = (xr
+    xda_sr = (xr
         .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
+        .astype(np.float32)
         .isel(x=x_slice, y=y_slice)
     )
-    xda = (xda
-        .where(xda != nodata)
-        .rio.write_nodata(np.nan, encoded=True)
-    ) * scale_factor + add_offset
+    
+    xda_sr = (xda_sr.where(xda_sr != nodata) * scale_factor + add_offset).rio.write_nodata(np.nan, encoded=True)
 
-    xda = xda.rio.write_crs('EPSG:4326').rio.reproject(
+    xda_flags = xds.land_water_mask.isel(x=x_slice, y=y_slice).astype(np.float32)
+
+    nan_mask = np.isnan(xda_sr.data).any(axis=0)
+    xda_flags.data[nan_mask] = np.nan
+
+    lon[nan_mask] = np.nan
+    lat[nan_mask] = np.nan
+
+    xds = xr.Dataset(dict(SDR=xda_sr, LW_flags=xda_flags))
+
+    xds = xds.rio.write_crs('EPSG:4326').rio.reproject(
         dst_crs=epsg_code, 
         resolution=resolution, 
         src_geoloc_array=(lon, lat), 
-        georeferencing_convention='PIXEL_CENTER'
+        georeferencing_convention='PIXEL_CENTER',
+        **reproj_kwargs
     )
 
-    xda = xda.rio.interpolate_na(method=interp_method)
-    
     bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
-    xda = xda.rio.clip_box(*bounds)
+    xds = xds.rio.clip_box(*bounds)
 
-    return xda
+    return xds
 
 
 
@@ -110,6 +118,7 @@ def load_sen3_syn_to_raster(data_dir_path: str, bbox: list[float], resolution: f
 
     xda_sdr = (xr
         .DataArray(data, dims=('band', 'y', 'x'), coords={'band': bands})
+        .astype(np.float32)
         .isel(x=x_slice, y=y_slice)
     )
     #xda = (xda
