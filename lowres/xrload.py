@@ -1,7 +1,9 @@
 from pyhdf.SD import SD, SDC
 import rioxarray as rxr # load .rio accessor
 import xarray as xr
+import xoak
 import numpy as np
+import pandas as pd
 import geopandas as gpd
 from shapely.geometry import box
 
@@ -21,6 +23,14 @@ def _get_geolocation_slices(lon: xr.DataArray, lat: xr.DataArray, bbox: tuple[fl
 
     return x_slice, y_slice
 
+
+def _overlap_to_nan(x):
+    x_ = x.copy()
+    diff = x_.dropna().diff()
+    while (diff < 0).any():
+        x_[diff[diff < 0].index] = np.nan
+        diff = x_.dropna().diff()
+    return x_
 
 
 def load_viirs_to_raster(data: list[str, str], bbox: list[float], resolution: float, *, viirs_bands: tuple[int] = (1, 2, 3),
@@ -74,9 +84,16 @@ def load_viirs_to_raster(data: list[str, str], bbox: list[float], resolution: fl
     lon[nan_mask] = np.nan
     lat[nan_mask] = np.nan
 
-    xds = xr.Dataset(dict(SDR=xda_sr, LW_flags=xda_flags))
+    lat = pd.DataFrame(lat).apply(_overlap_to_nan, axis=0).values.copy()
+    nan_mask = np.isnan(lat)
+    lon[nan_mask] = np.nan
 
-    xds = xds.rio.write_crs('EPSG:4326').rio.reproject(
+    xda_sr = xda_sr.where(~np.expand_dims(nan_mask, axis=0))
+    xda_flags = xda_flags.where(~nan_mask)
+
+    xds_src = xr.Dataset(dict(SDR=xda_sr, LW_flags=xda_flags))
+
+    xds_dst = xds_src.rio.write_crs('EPSG:4326').rio.reproject(
         dst_crs=epsg_code, 
         resolution=resolution, 
         src_geoloc_array=(lon, lat), 
@@ -85,9 +102,27 @@ def load_viirs_to_raster(data: list[str, str], bbox: list[float], resolution: fl
     )
 
     bounds = gpd.GeoSeries([box(*bbox)], crs='EPSG:4326').to_crs(epsg_code).total_bounds
-    xds = xds.rio.clip_box(*bounds)
+    xds_dst = xds_dst.rio.clip_box(*bounds)
 
-    return xds
+    mask = np.isnan(xds_dst.LW_flags.data)
+    grid = np.meshgrid(xds_dst['x'].data, xds_dst['y'].data)
+    nan_p = gpd.GeoSeries.from_xy(grid[0][mask].ravel(), grid[1][mask].ravel(), crs=xds_dst.rio.crs).to_crs('EPSG:4326')
+
+    lat[np.isnan(lat)] = -9999
+    lon[np.isnan(lon)] = -9999
+
+    xds_src['lat'] = (('y', 'x'), lat)
+    xds_src['lon'] = (('y', 'x'), lon)
+
+    xds_src = xds_src.set_coords(('lat', 'lon'))
+    xds_src.xoak.set_index(('lat', 'lon'), 'sklearn_balltree')
+
+    nan_p_sel = xds_src.xoak.sel(lat=xr.DataArray(nan_p.y.values, dims='z'), lon=xr.DataArray(nan_p.x.values, dims='z'))
+
+    xds_dst.LW_flags.data[mask] = nan_p_sel.LW_flags.data
+    xds_dst.SDR.data[:, mask] = nan_p_sel.SDR.data
+
+    return xds_dst
 
 
 
